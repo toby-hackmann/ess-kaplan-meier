@@ -1,0 +1,923 @@
+---
+title: "Effective sample size for the Kaplan-Meier estimator: An intuitive measure of uncertainty"
+authors:
+  - name: Toby Hackmann
+    affiliation: 
+      - ref: lumc
+    roles: analysis, writing
+    corresponding: true
+  - name: Doranne Thomassen
+    affiliation: 
+      - ref: lumc
+    roles: conceptualization
+  - name: Anne M Stiggelbout,
+    affiliation: 
+      - ref: lumc
+  - name: Saskia le Cessie
+    affiliation:
+      - ref: lumc
+      - ref: epi
+  - name: Hein Putter
+    affiliation: 
+      - ref: lumc
+  - name: Liesbeth C de Wreede
+    affiliation: 
+      - ref: lumc
+  - name: Ewout W Steyerberg
+    affiliation: 
+      - ref: lumc
+      - ref: julius
+    
+affiliations:
+  - id: lumc
+    name: Department of Biomedical Data Sciences, Leiden University Medical Center, Leiden, the Netherlands
+  - id: epi
+    name: Department of Clinical Epidemiology, Leiden University Medical Center, Leiden, the Netherlands
+  - id: julius
+    name: Julius Center for Health Sciences and Primary Care, University Medical Center Utrecht, Utrecht, the Netherlands
+    
+bibliography: references.bib
+
+abstract: | 
+    Sample size is an essential determinant of the uncertainty in clinical research results that are presented in articles. When studies present time-to-event outcomes with Kaplan-Meier curves, these are often accompanied by the remaining number of patients at risk in a table below the curve. The number at risk at time t informs about uncertainty of the hazard at t, rather than the uncertainty of the estimated survival probability at t,S ̂(t). We aim to review the role of the effective sample size of S ̂(t) in clinical research. Effective sample size can be interpreted as the size of a hypothetical sample, that would give the same variance of S ̂(t)  as a sample with complete follow-up until time t. Illustrations in hypothetical scenarios and a publicly available dataset confirm that effective sample size provides a readily interpretable measure of uncertainty for survival curves. It can provide intuition about uncertainty when added to risk tables below a Kaplan-Meier curve. Effective sample size can also quantify the impact of choosing the timing of administrative censoring of an ongoing cohort study or randomized trial. In conclusion, effective sample size is a valuable measure that may be used more often to accompany the Kaplan-Meier curves in clinical research results.
+   
+keywords:
+  - sample size
+  - kaplan-meier
+  - survival
+  - risk communication
+  
+funding: "Funded by the European Union under Horizon Europe Work Programme 101057332. Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union or the European Health and Digital Executive Agency (HaDEA). Neither the European Union nor the granting authority can be held responsible for them. The UK team are funded under the Innovate UK Horizon Europe Guarantee Programme, UKRI Reference Number: 10041120."
+---
+
+```{r}
+#| label: initialize
+#| output: FALSE
+
+# To reproduce the results
+set.seed(19231030)
+
+# Packages required
+pkgs <- c(
+  "grid",
+  "gridExtra",
+  "plotly"
+)
+
+# Check if the package is installed, if yes load, if no: install + load 
+vapply(pkgs, function(pkg) {
+  if (!require(pkg, character.only = TRUE)) install.packages(pkg)
+  require(pkg, character.only = TRUE, quietly = TRUE)
+}, FUN.VALUE = logical(length = 1L))
+
+rm(pkgs)
+
+source( "code/compile.R" )
+
+# load data
+colon_df <- colon
+names <- c('sex', 'obstruct', 'perfor', 'differ', 'extent', 'surg', 'node4', 'etype')
+colon_df <- colon_df |> 
+  mutate( across( all_of(names), as.numeric ) )
+rm(names)
+colon_os <- colon_df[colon_df$etype == 2, ]
+colon_rfs <- colon_df[colon_df$etype == 1, ]
+
+colon_os$time <- colon_os$time/365.25
+```
+
+# Introduction
+Sample size is an important measure for the intuitive understanding of the uncertainty of study outcomes. Studies with a larger sample size estimate their outcomes with lower levels of uncertainty. Prediction models developed on larger samples provide more stable predictions for individual patients [@riley2023]. Because sample size is regularly reported, many researchers and clinicians will understand the relation between sample size and uncertainty.
+
+When the time of the event is not observed, this is called censoring. Censoring occurs for two main reasons:  patients can drop out of the study (“loss to follow-up”), or they can be administratively censored when the study observation period ends. In both cases, an assumption required for most data analysis methods is that the censoring is independent of the (unobserved) event time. Because of censoring and the time-to-event nature of the data, specific estimators are commonly used for the survival probabilities over time, such as the Kaplan-Meier estimator. In this article, we want to find an intuitive measure of uncertainty of survival estimates with an interpretation that is the same as sample size in studies without censoring, while taking censoring into account.
+Sample size at the start of a study as a simple measure of uncertainty does not provide this intuitive measure, because it does not consider censoring. The number of patients at risk does not provide this intuitive measure either, because it can be interpreted only as the sample size of the estimated hazard at that time, instead of the estimated survival probability. We propose to use effective sample size [@thomassen2024] as a measure of uncertainty for survival estimates, which does have the interpretation of the sample size in a similar study without censoring.
+
+Effective sample size for survival curves has been mentioned at the introduction of the Kaplan-Meier estimator [@kaplanmeier1958], but it has not been implemented in the reporting of Kaplan-Meier curves in research articles. Additionally, it was used for assessing the quantifiable benefit of including censored patients in the analysis of survival data, which was not yet the consensus at the time [@cutler1947;@cutler1958]. Effective sample size has also been used for more conservative calculations of variance compared to the common Greenwood estimator [@peto1977;@rothman1978]. This leads to wider 95%-confidence intervals that are more likely to provide at least 95% coverage in the tail [@yuan2011]. Such methods of calculating confidence intervals were later expanded upon [@dorey1987.
+
+In this article, we aim to evaluate the concept of effective sample size for estimates of survival probabilities based on the Kaplan-Meier estimator for improved interpretability of the uncertainty of survival curves monitoring collected information over time in clinical trials. We first elaborate on the concept of effective sample size, followed by illustrations in a case study and simulations, the latter to better understand its behavior. We end with a discussion on potential roles of the effective sample size and on future research.
+
+
+# Methods
+
+## Definition
+Effective sample size has been defined by @kaplanmeier1958 as a sample size, “which in the absence of losses would give the same variance [as the variance of the Kaplan-Meier estimate]”. More specifically, we will define effective sample size for an estimated survival outcome at the time of interest $\hat S(t)$ as the size of a hypothetical sample with complete observation at time $t$, with mean survival  $\bar S(t)$ equal to $\hat S(t)$, such that the variance of $\hat S(t)$ is the same as the sampling variance of  $\bar S(t)$ in the hypothetical population. 
+
+We equate the estimated variance of the Kaplan-Meier estimated survival outcome $\hat S(t)$ with the binomial sampling variance of the mean outcome $\bar S(t)$.
+
+$$
+\hat V_{GW}[\hat S(t) ]  = V_{Bin}[ \bar S(t) ],
+$$ {#eq-km-greenwood}
+
+$$
+\hat S ^2(t)\sum_{t_i \leq t}\frac{\delta_i}{R_i(R_i-\delta_i)} = \frac{\bar S(t)(1-\bar S(t))}{N}, 
+$$ {#eq-equiv}
+
+where $\delta_i$ are the number of events and $R_i$ the number of patients at risk at time $t_i$. The Greenwood estimator for the variance of the Kaplan-Meier estimator is used on the left hand side (@eq-km-greenwood;@eq-equiv) [@greenwood1926]. Now we replace the sample mean survival with the estimated survival, and the complete sample size with the effective sample size. This can be rewritten to provide the estimator for effective sample size:
+
+$$
+\hat S^2(t)\sum_{i: t_i \leq t}\frac{\delta_i}{R_i(R_i-\delta_i)} = \frac{\hat S(t)(1-\hat S(t))}{\hat N_{\text{eff}} (t)},
+$$ {#eq-effective-n-step}
+
+$$
+\hat N_{\text{eff}}(t) = \frac{1-\hat S(t)}{\hat S (t)\sum_{i: t_i \leq t}\frac{\delta_i}{R_i(R_i-\delta_i)}}.
+$$ {#eq-effective-n}
+
+Effective sample size is undefined when $\sum_{i: t_i \leq t}\frac{\delta_i}{R_i(R_i-\delta_i)} = 0$, which happens when there has not yet been an event. Before the first event occurs, we define effective sample size as the number of patients at risk of an event.
+
+This quantity is the ‘effective sample size for estimates based on the Kaplan-Meier estimator’, but for brevity and readability we refer to $N_{\text{eff}}$ for effective sample size.
+
+
+## Modified effective sample size
+In the tail of the survival curve, if no events occur and patients are censored, $N_{\text{eff}}$ stays constant. This could be considered a limitation of the above definition of $N_{\text{eff}}$, because, intuitively, censoring should decrease the reliability of the survival curve. However, by definition, the Greenwood variance and confidence intervals in the tail of the survival curve only change at times with events. Methods to improve the variance and confidence interval estimation and coverage of 95% confidence intervals in the tail have been proposed [@rothman1978]. One such method is to modify the variance estimation procedure when there is censoring but no event [@dorey1987]. This method provides better coverage but is also much more conservative than the standard Greenwood estimator [@yuan2011].
+
+The modified effective sample size is the same as the standard $N_{\text{eff}}$ (@eq-effective-n) at times t when events occur. However, modified effective sample size is different at times t when there is only censoring. At such a censoring-only time t, the variance is updated by removing the most recent event before t and having it occur at t. Then both the survival probability used in $N_{\text{eff}}$ estimation and Greenwood’s formula are recalculated using this new event time. This new survival probability is only used in variance estimation, not to adjust the point estimate of survival. The modified survival function is estimated as:
+
+$$
+\hat S_{mod}(t_c) := \left(\prod_{i: t_i \leq t_{k-1}} \left[1-\frac{\delta_i}{R_i} \right]\right) \left( 1-\frac{\delta_k - 1}{R_k}\right) \left( 1 - \frac{1}{R_{t_c} + 1} \right),
+$$ {#eq-mod-surv}
+
+where $t_k$ is the time with the most recent event before $t_c$ and $t_c$ denotes that it is a time with only censoring. Modified variance is defined as:
+
+$$
+\hat V_{mod}\left[ \hat S_{mod}(t_c) \right] := \hat S^2_{mod}(t_c) \left( \sum_{i: t_i\leq t_{k-1}}\left[\frac{\delta_i}{R_i(R_i-\delta_i)}\right] + \frac{\delta_k - 1}{R_k(R_k-\delta_k+1)} + \frac{1}{(R_{t_c}+1)R_{t_c}}\right).
+$$ {#eq-mod-var}
+
+Using the same equation between the modified estimated variance and modified sampling variance as in @eq-km-greenwood, we find
+
+$$
+N^*_{mod}(t_c) = \frac{\hat S_{mod}(t_c)\left( 1 - \hat S_{mod}(t_c)\right)}{\hat V_{mod}\left[ \hat S_{mod}(t_c) \right]}.
+$$ {#eq-mod-n}
+
+Modified effective sample decreases at times $t$ with only censoring and can therefore continue to decrease after the last observed event. For brevity, we will refer to this quantity as modified $N_{\text{eff}}$, going forward.
+
+
+## Illustrative clinical data
+We will first illustrate the behavior of effective sample size using a publicly available clinical data set. The colon cancer data set colon [@laurie1989; @moertel1995] available in the `survival` @package-survival package in `R` includes patients from a clinical trial of adjuvant chemotherapy after a resection with curative intent for a histologically confirmed adenocarcinoma of the colon or rectum. Patients were assigned to either observation, treatment with levimasole (Lev) alone, or treatment with levimasole and fluorouracil (5FU). Overall survival and progression-free survival were the two end points. In the results, we will look at overall survival.
+
+
+## Simulation study 1: Dependence on hazards
+Next, we illustrate the behavior of $N_{\text{eff}}$ in some simulated settings. The aim of the first simulation setting is to illustrate the behavior of $N_{\text{eff}}$ with varying event and censoring hazards.
+
+The `simsurv` package [@package-simsurv] was used to generate survival times $T_E$ and censoring times $T_C$ from Weibull hazard functions. An event was observed at time $T_E$ if $T_E \leq T_C$ and a patient was censored at time $T_C$ if $T_C<T_E$. All patients were administratively censored at $T=5$.  We generated survival data using Weibull($a$ , $b$) distributions, with a representing the shape parameter, and b the scale parameter, in such a way that the cumulative hazard was
+
+$$
+H(t) = \left(\frac{t}{b}\right)^a.
+$$ {#eq-rweibull}
+
+Three different Weibull distributions were used for both event and censoring time generation for a total of 9 combinations. Shape parameters ($a$) determine early, evenly spread, or late occurrence of events and censoring ($a\in\{\frac{1}{4}, 1,4\}$). Scale parameters ($b$) define when the cumulative hazard reaches $1$. Parameter $b=2.5$ is used for event simulations, while $b=3.5$ is used for censoring simulation. This difference ensures that, on average, more patients will have an event than be censored with the same shape parameter. The distributions are illustrated in @fig-cumhaz.
+
+A second simulation was ran to show that even when both the survival probability and number at risk are the same, $N_{\text{eff}}$ can be different. For both iterations the survival times are simulated from a Weibull( $1$, $2.5$ ) cumulative hazard distribution, and the two different censoring times from Weibull( $0.5$, $2.5$ ) and Weibull( $2$, $2.5$ ) cumulative hazard distributions.
+
+Each simulated sample consisted of $1,000$ patients. The estimated survival function, $N_{\text{eff}}$, number of patients uncensored and number at risk were averaged over $50,000$ replications.
+
+
+```{r}
+#| eval: FALSE
+#| output: FALSE
+#| include: FALSE
+#| label: fig-weibull
+#| fig-width: 7
+#| fig-asp: 0.618
+#| fig-cap: |
+#|   Cumulative hazards of the different simulations. Early, constant and late simulations are goverened by the shape parameters set at $\frac{1}{4},\ 1$ or $4$. To generate a larger proportion of events compared to censorings, the scale parameter for event simulation is 2.5 and for censoring time simulation it is 3.5. The cumulative hazard reaches 1 at these times.
+#| warning: FALSE
+
+# Generate Weibull distributed data
+data1 <- -log( 1- pweibull(seq(0, 5, by = 0.01), shape = 1/4, scale = 2.5) )
+data2 <- -log( 1- pweibull(seq(0, 5, by = 0.01), shape = 1, scale = 2.5) )
+data3 <- -log( 1- pweibull(seq(0, 5, by = 0.01), shape = 4, scale = 2.5) )
+data4 <- -log( 1- pweibull(seq(0, 5, by = 0.01), shape = 1/4, scale = 3.5) )
+data5 <- -log( 1- pweibull(seq(0, 5, by = 0.01), shape = 1, scale = 3.5) )
+data6 <- -log( 1- pweibull(seq(0, 5, by = 0.01), shape = 4, scale = 3.5) )
+#data7 <- -log( 1- pweibull(seq(0, 5, by = 0.01), shape = 0.5, scale = 3) )
+
+# Combine density estimates into a data frame
+df <- data.frame(
+  x = c(seq(0, 5, by = 0.01), seq(0, 5, by = 0.01), seq(0, 5, by = 0.01), seq(0, 5, by = 0.01), seq(0, 5, by = 0.01), seq(0, 5, by = 0.01)#, seq(0, 5, by = 0.01)
+        ),
+  y = c(data1, data2, data3, data4, data5, data6#, data7
+        ),
+  group = factor(rep(c("Early Event", "Constant Event", "Late Event", "Early Censor", "Constant Censor", "Late Censor"#, "Trial Simulation"
+                       ), 
+                     each = length(data1)))
+)
+
+# Define custom colors
+custom_colors <- c("Early Event" = "#2E7691", 
+                   "Constant Event" = "#C2666B", 
+                   "Late Event" = "#c6aa2c",
+                   "Early Censor" = "#86c2d9",
+                   "Constant Censor" = "#e0b2b5",
+                   "Late Censor" = "#e2cf7b"#,
+                   #"Trial Simulation" = "#9f84af"
+                   )
+
+# Plot using ggplot2
+plot <- ggplot(df, aes(x = x, y = y, color = group)) +
+  geom_line( linewidth = 1.2 ) +
+  scale_color_manual(values = custom_colors) +
+  xlim(0, 5) +
+  ylim(0, 3) +
+  labs(title = "Comparison of the cumulative hazards for simulation",
+       x = "Time (years)",
+       y = "Cumulative hazard",
+       color = "Simulation") +
+  theme_minimal()
+plot
+#ggsave(file = "images/cumhaz.svg", plot=plot, width = 10, height = 7)
+
+rm(data1, data2, data3, data3, data4, data5, data6, #data7, 
+   df, custom_colors)
+```
+
+![](images/cumhaz.jpg){#fig-cumhaz fig-alt="Cumulative hazards for the simulation scenarios. Early censoring and events use a shape parameter of ¼, causing a sharp rise very early on. Constant censoring and events have shape parameter of 1, making them equivalent to exponential distributions. For the late censoring and events a shape parameter of 4 is used, causing a rapid increase in cumulative hazards at later times."}
+
+
+## Simulation setting 2: Trial simulation
+The context for this simulation is that of a clinical trial where the primary outcome of interest is survival. Two time scales are important in this context, the calendar time of the study $T$ and the time-in-study of a patient $t$. The study starts when the first patient is enrolled at time $T_{\mathrm{start\ enrollment}}= T_0$. Enrollment ends at $T_{\mathrm{end\ enrollment}}$ and the study results will be evaluated at time $T_{\mathrm{report}}$. It is assumed that patients enroll uniformly over the interval $[T_{\mathrm{start\ enrollment}},T_{\mathrm{end\ enrollment}}]$.
+
+On the patient time scale, time runs from their enrollment at $t_0$ to either their event time $t_E$ or until they reach the outcome time of interest $t_{\mathrm{outcome}}$ and are censored. It is assumed that there is no censoring due to drop-out in the trial. When the trial reporting time $T_{\mathrm{report}}\geq T_{\mathrm{end\ enrollment}}+ t_{\mathrm{outcome}}$, all patients could have had $t_{\mathrm{outcome}}$ of follow-up time and there is no censoring. In this scenario, the effective sample size for $\hat S(t_{\mathrm{outcome}})$ is equal to the number of patients enrolled in the trial.
+
+Due to circumstances such as lower enrollment than expected or lack of funding, researchers may want report earlier, then $T_{\mathrm{report}}<T_{\mathrm{end\ enrollment}}+ t_{\mathrm{outcome}}$. A patient enrolled at time $T_{\mathrm{enroll}}$ will be administratively censored at time $t_{\mathrm{censored}}= T_{\mathrm{report}}- T_{\mathrm{enroll}}$. For example, a patient enrolled 2 years after the start of a study that ends for reporting after 3 years, will be censored at $3 – 2 = 1$ year of follow-up. This censoring will reduce the amount of available information to estimate $\hat S(t_{\mathrm{outcome}})$. To monitor the amount of information available for reporting trial results earlier, we suggest using $N_{\text{eff}}$ as an interpretable value for clinical researchers.
+
+As an illustration of this application of $N_{\text{eff}}$, results of one specific scenario are shown. This is a trial with a two-year enrollment period ($T_{\mathrm{end\ enrollment}}=2$) and a primary outcome of two-year overall survival ($t_{\mathrm{outcome}}=2$). Survival times were simulated from a Weibull($0.5$,$3$) distribution for the baseline hazard using the `simsurv` package and the treatment had a hazard ratio of $0.7$ relative to the control group. The sample size was $250$ patients per arm and $25,000$ repetitions were used. Mean modified $N_{\text{eff}}$ was calculated as a function of reporting (T_report) time, with a $95\%$ confidence interval.
+
+For the estimation of the survival function, we used the `R` [@R] package `survival` [@package-survival]. The functions used to estimate the effective sample size work on the `survfit` object returned by (stratified) Kaplan-Meier models and can be found on GITHUB XXXX. Code for an R Shiny application to run the trial simulations can be found on GITHUB XXXX.
+
+
+# Results
+
+## Illustration in clinical data
+Overall survival was $46\%$ at $8$ years in the colon cancer data set (@fig-colon). Before any patients are censored, $N_{\text{eff}}$ is equal to the complete sample size in the data ($929$). After patients have been censored, $N_{\text{eff}}$ begins to decrease. We compare $N_{\text{eff}}$ to the number at risk and the number not censored (Figure 2B). The number at risk, defined as the number of patients who are both alive and still in follow-up is much smaller than $N_{\text{eff}}$ throughout the follow-up. The number not censored, defined as the sum of the number at risk and cumulative events, decreases earlier than $N_{\text{eff}}$  A comparison with the number of patients at risk, which is defined as the number of patients who are both alive and still in follow-up at time t, shows that $N_{\text{eff}}$ remains much higher throughout the follow-up. 
+
+```{r}
+#| eval: FALSE
+#| output: FALSE
+#| label: fig-n-eff-km
+#| fig-height: 5
+#| fig-asp: 0.618
+#| fig-cap: |
+#|   Kaplan-Meier estimate of the complete data from the illustrative colon dataset. Next to it is the effective sample size and modified effective sample size of the estimates. For comparison the number of patients at risk is included, as well as the number of patients who have not been censored, which could be considered a 'complete case analysis' sample size.
+#| fig-subcap:
+#|  - "Plot of the Kaplan-Meier estimate of the overall survival in the colon data set."
+#|  - "Effective sample size of the Kaplan-Meier estimate of the overall survival in the colon data set."
+#| layout-ncol: 2
+
+
+obj <- survfit( Surv( time, status ) ~ 1, data = colon_os ) |>
+  survfit_n()
+
+# Plot the KM
+p1 <- plot_km_eff2( obj, both = F, title = "Kaplan-Meier curve", xlab = "Time (years)")
+#ggsave(file = "images/colon_km.svg", plot=p1, width = 9, height = 10)
+p1
+
+# Plot the effective N
+p2 <- plot_effective_n( obj, mod = T, survival = F, bounds = F, title = "Effective sample size", xlab = "Time (years)", xmax = 8 )
+#ggsave(file = "images/colon_effn.svg", plot=p2, width = 12, height = 10)
+p2
+```
+
+![Kaplan-Meier estimate of overall survival based on the complete data from the colon dataset (A), with corresponding indicators of sample size (B). Effective sample size is always higher than the number at risk and only begins to decrease after censoring becomes more frequent.](images/colon_ill_3.jpg){#fig-colon}
+
+Survival is constant in the tail of the curve (@fig-colon), with a constant estimate of the effective sample size. The modified $N_{\text{eff}}$ decreases however with continued censoring of patients.
+
+It is common to show numbers related to sample size in tables below the survival curve. These often contain the number at risk and/or the cumulative number of events. Displaying the (modified) $N_{\text{eff}}$ in tables provides a readily interpretable number for the reliability of the survival estimate at that time.
+
+
+```{r}
+#| output: TRUE
+#| warning: FALSE
+#| label: fig-tx
+#| fig-width: 10
+#| fig-asp: 0.7
+#| fig-cap: |
+#|   Kaplan-Meier curve of the colon data stratified by treatment arm. Effective sample size provides a more optimistic value of the amount of information that the estimator is based on, when compared to the number at risk. While there seems to be no real difference in censoring patterns, $N_{\text{eff}}$ of the three curves at $t=8$ are quite different due to the different times at which the last event occured in the three samples. Modified effective sample size is very similar for the three curves at $t=8$. 
+survfit( Surv( time, status) ~ rx, data = colon_os ) |>
+  survfit_n( ) |> 
+  plot_km_eff( both = T, mark = T, title = "Kaplan-Meier with effective sample size", xlab = "Time (years)", legend.pos = c(0.15, 0.5) ) 
+```
+
+$N_{\text{eff}}$ at the tail of the curve is highly dependent on the timing of the last event, since it remains constant afterwards ($t=8$ @fig-colon, @fig-tx). Modified $N_{\text{eff}}$ (@eq-mod-n) avoids this dependency. While the three curves for the treatment arms in @fig-tx have very different $N_{\text{eff}}$ at $t=8$, ($n=75$ to $n=210$), modified $N_{\text{eff}}$ are more similar ($n=75$ to $n=103$).
+
+
+## Dependence of $N_{\text{eff}}$ on hazards
+In the `colon` data used in the above results, most events occurred early in the follow-up and censoring occurred late. In a scenario of early censoring (left column @fig-simulation) $N_{\text{eff}}$ decreases rapidly. As time continues, $N_{\text{eff}}$ remains close to the number of uncensored patients. Patients censored early in follow-up decrease $N_{\text{eff}}$ by around 1 within a few subsequent events but have a lower impact on the tail than late censorings. An approximately linear decrease in effective sample size over time occurs with a constant hazard of censoring (middle column Figure 4). Late censoring (right column @fig-simulation) shows a similar impact on $N_{\text{eff}}$ as in the colon data. Initially, $N_{\text{eff}}$ is close to the complete sample size. At later times t, $N_{\text{eff}}$ decreases drastically, to numbers far below the number of uncensored patients. Late censoring combined with early events shows the largest difference between standard and modified $N_{\text{eff}}$
+
+The shape of $N_{\text{eff}}$ depends on the censoring hazard. How rapidly it will decrease depends on the event hazards. Modified $N_{\text{eff}}$ will be more conservative than $N_{\text{eff}}$ when there is late censoring without late events.
+
+
+![Results of the simulations based on the hazards proposed in Figure 1. The simulations are based on 1000 patients per simulation and are the average of 50,000? repetitions. Early, constant and late censoring results are shown in the left, middle and right columns. Event hazards are different between the top, middle and bottom rows. The shape of $N_{\text{eff}}$ over time depends mostly on the censoring hazard.](images/sim9.jpg){#fig-simulation}
+
+```{r}
+#| eval: FALSE
+#| include: FALSE
+#| label: fig-simulation
+#| fig-cap: Results of the simulations based on the hazards proposed in @fig-cumhaz. The simulations are based on 1000 patients per simulation and are the average of 50 repetitions to smoothen the results and avoid extreme outliers. Early, constant and late censoring results can be seen in the left, middle and right columns. Event hazards are different between the top, middle and bottom rows. We can observe that the shape of effective sample size over time depends mostly on the censoring hazard.
+#| fig-width: 14
+#| fig-asp: 1
+
+# Seed for consistency
+set.seed(111923)
+
+# scale[1] for events, scale[2] for censoring
+scale = c(2.5, 3.5)
+# shape[1] for early, [2] for middle and [3] for late
+shape = c(1/4, 1, 4)
+# number of iterations
+iter = 10
+# maxtime
+maxtime = 5
+# timegrid for plot
+time = seq(0, maxtime, 0.002)
+
+
+ee <- ec <- el <- ce <- cc <- cl <- le <- lc <- ll <- 0
+# Multiple simulations - average 1 at a time
+for ( i in 1:iter ){
+  # Generate the six datasets of 1000 patients
+  e_early <- simsurv( dist="weibull", 
+                         gammas=shape[1], 
+                         lambdas=scale[1]^(-shape[1]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  e_middle <- simsurv( dist="weibull", 
+                         gammas=shape[2], 
+                         lambdas=scale[1]^(-shape[2]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  e_late <- simsurv( dist="weibull", 
+                         gammas=shape[3], 
+                         lambdas=scale[1]^(-shape[3]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  c_early <- simsurv( dist="weibull", 
+                         gammas=shape[1], 
+                         lambdas=scale[2]^(-shape[1]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  c_middle <- simsurv( dist="weibull", 
+                         gammas=shape[2], 
+                         lambdas=scale[2]^(-shape[2]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  c_late <- simsurv( dist="weibull", 
+                         gammas=shape[3], 
+                         lambdas=scale[2]^(-shape[3]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  
+  # Build the 9 dataframes for the figures
+  early_early <- data.frame(
+    time = pmin(e_early$eventtime, c_early$eventtime),
+    status = ifelse(e_early$eventtime == maxtime & c_early$eventtime == maxtime, 0,
+                    ifelse(e_early$eventtime <= c_early$eventtime, 1, 0))
+  )
+  early_middle <- data.frame(
+    time = pmin(e_early$eventtime, c_middle$eventtime),
+    status = ifelse(e_early$eventtime == maxtime & c_middle$eventtime == maxtime, 0,
+                    ifelse(e_early$eventtime <= c_middle$eventtime, 1, 0))
+  )
+  early_late <- data.frame(
+    time = pmin(e_early$eventtime, c_late$eventtime),
+    status = ifelse(e_early$eventtime == maxtime & c_late$eventtime == maxtime, 0,
+                    ifelse(e_early$eventtime <= c_late$eventtime, 1, 0))
+  )
+  middle_early <- data.frame(
+    time = pmin(e_middle$eventtime, c_early$eventtime),
+    status = ifelse(e_middle$eventtime == maxtime & c_early$eventtime == maxtime, 0,
+                    ifelse(e_middle$eventtime <= c_early$eventtime, 1, 0))
+  )
+  middle_middle <- data.frame(
+    time = pmin(e_middle$eventtime, c_middle$eventtime),
+    status = ifelse(e_middle$eventtime == maxtime & c_middle$eventtime == maxtime, 0,
+                    ifelse(e_middle$eventtime <= c_middle$eventtime, 1, 0))
+  )
+  middle_late <- data.frame(
+    time = pmin(e_middle$eventtime, c_late$eventtime),
+    status = ifelse(e_middle$eventtime == maxtime & c_late$eventtime == maxtime, 0,
+                    ifelse(e_middle$eventtime <= c_late$eventtime, 1, 0))
+  )
+  late_early <- data.frame(
+    time = pmin(e_late$eventtime, c_early$eventtime),
+    status = ifelse(e_late$eventtime == maxtime & c_early$eventtime == maxtime, 0,
+                    ifelse(e_late$eventtime <= c_early$eventtime, 1, 0))
+  )
+  late_middle <- data.frame(
+    time = pmin(e_late$eventtime, c_middle$eventtime),
+    status = ifelse(e_late$eventtime == maxtime & c_middle$eventtime == maxtime, 0,
+                    ifelse(e_late$eventtime <= c_middle$eventtime, 1, 0))
+  )
+  late_late <- data.frame(
+    time = pmin(e_late$eventtime, c_late$eventtime),
+    status = ifelse(e_late$eventtime == maxtime & c_late$eventtime == maxtime, 0,
+                    ifelse(e_late$eventtime <= c_late$eventtime, 1, 0))
+  )
+  ee <- ee + 1/iter*(survfit( Surv( time, status ) ~ 1, data = early_early ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  ec <- ec + 1/iter*(survfit( Surv( time, status ) ~ 1, data = early_middle ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  el <- el + 1/iter*(survfit( Surv( time, status ) ~ 1, data = early_late ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  ce <- ce + 1/iter*(survfit( Surv( time, status ) ~ 1, data = middle_early ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  cc <- cc + 1/iter*(survfit( Surv( time, status ) ~ 1, data = middle_middle ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  cl <- cl + 1/iter*(survfit( Surv( time, status ) ~ 1, data = middle_late ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  le <- le + 1/iter*(survfit( Surv( time, status ) ~ 1, data = late_early ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  lc <- lc + 1/iter*(survfit( Surv( time, status ) ~ 1, data = late_middle ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  ll <- ll + 1/iter*(survfit( Surv( time, status ) ~ 1, data = late_late ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+}
+
+
+
+
+# Early-early
+plot1 <- plot_effective_n( ee, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = F, ticks_y_sec = F, ylim = c(0, 1000) )
+
+# Early-middle
+plot2 <- plot_effective_n( ec, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = F, ticks_y = F, ticks_y_sec = F, ylim = c(0, 1000) )
+
+# Early-late
+plot3 <- plot_effective_n( el, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = F, ticks_y = F, ylim = c(0, 1000) )
+
+# Middle-early
+plot4 <- plot_effective_n( ce, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = F, ticks_y_sec = F, ylim = c(0, 1000) ) #+
+  #annotate("text", x = 0, y = 480, label = "Patients", angle = 90)
+
+# Middle-middle
+plot5 <- plot_effective_n( cc, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = F, ticks_y = F, ticks_y_sec = F, ylim = c(0, 1000) )
+
+# Middle-late
+plot6 <- plot_effective_n( cl, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = F, ticks_y = F, ylim = c(0, 1000) ) #+
+  #annotate("text", x = 5, y = 500, label = "Incidence", angle = 270)
+
+# Late-early
+plot7 <- plot_effective_n( le, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_y_sec = F, ylim = c(0, 1000) )
+
+# Late-middle
+plot8 <- plot_effective_n( lc, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_y = F, ticks_y_sec = F, ylim = c(0, 1000) ) #+
+  #annotate("text", x = 2.5, y = 20, label = "Time")
+
+# Late-late
+plot9 <- plot_effective_n( ll, mod = T, survival = F, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_y = F, ylim = c(0, 1000) )
+
+# Combine plots into list
+plots <- list( plot1, plot2, plot3, plot4, plot5, plot6, plot7, plot8, plot9 )
+
+# Column and row labels
+col_labels <- c("Early censoring", "Constant censoring", "Late censoring")
+row_labels <- c("Early events", "Constant events", "Late events")
+
+# Create text grobs for column and row labels
+col_text <- lapply(col_labels, textGrob, gp = gpar(fontsize = 14))
+row_text <- lapply(row_labels, textGrob, gp = gpar(fontsize = 14), rot = 90)
+
+# Create a sample plot to extract the legend
+legend_plot <- ggplot(data.frame(x = 1, y = 1, 
+                                 color = c("Effective", "Modified", "Uncensored", "At risk", "Incidence"), 
+                                 linetype = c("Effective", "Modified", "Uncensored", "At risk", "Incidence")), 
+                      aes(x = x, y = y, color = color, linetype = linetype)) +
+  geom_line(linewidth = 1.3) +
+  scale_color_manual(values = c("Effective"= "#37293F", "Modified" = "#9f84af", "Uncensored" = "#c6aa2c", "At risk" = "#C2666B"), name = "Legend") +
+  scale_linetype_manual(values = c("Effective"= "solid", "Modified" = "solid", "Uncensored" = "dotdash", "At risk" = "dashed"), name = "Legend") +
+  theme(legend.position = "right") + theme_minimal()
+# "Bounds", 
+# "Bounds" = "#c6b5cf", 
+# "Bounds" = "dashed", 
+
+
+# Extract the legend
+legend <- cowplot::get_legend(legend_plot)
+
+# Create top row with column labels
+top_row <- arrangeGrob(
+  grobs = c(list(textGrob("")), col_text),
+  ncol = 4,
+  widths = c(0.1, 732/675, 1, 732/675)
+)
+
+# Create each row with plots and row label
+rows <- lapply(1:3, function(i) {
+  arrangeGrob(
+    grobs = c(list(row_text[[i]]), plots[((i-1)*3+1):(i*3)]),
+    ncol = 4,
+    widths = c(0.1, 732/675, 1, 732/675)
+  )
+})
+
+# Combine the top row and all plot rows into the final grid
+final_grid <- arrangeGrob(
+  grobs = c(list(top_row), rows),
+  ncol = 1,
+  heights = c(0.1, 1, 1, 827/800)
+)
+
+# Add legend to the grid
+combined_grid <- arrangeGrob(
+  final_grid,
+  legend,
+  ncol = 2,
+  widths= c(8, 1)
+)
+
+
+grid.arrange(combined_grid)
+
+
+#ggsave(file = "images/sim2.svg", plot=combined_grid, width = 12, height = 12, dpi = 700)
+rm( shape, scale, e_early, e_middle, e_late, c_early, c_middle, c_late, 
+    early_early, early_middle, early_late, middle_early, middle_middle, 
+    middle_late, late_early, late_middle, late_late, plot1, plot2, plot3, plot4,
+    plot5, plot6, plot7, plot8, plot9, plots, col_labels, row_labels, col_text, 
+    row_text, legend_plot, legend, top_row, rows, final_grid, combined_grid)
+```
+
+```{r}
+#| eval: FALSE
+#| include: FALSE
+
+# This is just to generate seperate KMs
+
+ e_early <- simsurv( dist="weibull", 
+                         gammas=shape[1], 
+                         lambdas=scale[1]^(-shape[1]), 
+                         x=data.frame(id = 1:100000),
+                         maxt=maxtime)
+  p <- survfit( Surv( eventtime, status)~1, data = e_early)|>
+        survfit_n() |>
+        plot_km_eff2( xlab = "Time (years)")
+  ggsave(file = "images/sim_km_e.svg", plot=p, width = 7, height = 5)
+  
+  e_middle <- simsurv( dist="weibull", 
+                         gammas=shape[2], 
+                         lambdas=scale[1]^(-shape[2]), 
+                         x=data.frame(id = 1:100000),
+                         maxt=maxtime)
+    p <- survfit( Surv( eventtime, status)~1, data = e_middle)|>
+        survfit_n() |>
+        plot_km_eff2( xlab = "Time (years)")
+  ggsave(file = "images/sim_km_m.svg", plot=p, width = 7, height = 5)
+  
+  e_late <- simsurv( dist="weibull", 
+                         gammas=shape[3], 
+                         lambdas=scale[1]^(-shape[3]), 
+                         x=data.frame(id = 1:100000),
+                         maxt=maxtime)
+    p <- survfit( Surv( eventtime, status)~1, data = e_late)|>
+        survfit_n() |>
+        plot_km_eff2( xlab = "Time (years)")
+  ggsave(file = "images/sim_km_l.svg", plot=p, width = 7, height = 5)
+  
+  c_early <- simsurv( dist="weibull", 
+                         gammas=shape[1], 
+                         lambdas=scale[2]^(-shape[1]), 
+                         x=data.frame(id = 1:100000),
+                         maxt=maxtime)
+    p <- survfit( Surv( eventtime, status)~1, data = c_early)|>
+        survfit_n() |>
+        plot_km_eff2( xlab = "Time (years)")
+  ggsave(file = "images/simc_km_e.svg", plot=p, width = 7, height = 5)
+  
+  c_middle <- simsurv( dist="weibull", 
+                         gammas=shape[2], 
+                         lambdas=scale[2]^(-shape[2]), 
+                         x=data.frame(id = 1:100000),
+                         maxt=maxtime)
+    p <- survfit( Surv( eventtime, status)~1, data = c_middle)|>
+        survfit_n() |>
+        plot_km_eff2( xlab = "Time (years)")
+  ggsave(file = "images/simc_km_m.svg", plot=p, width = 7, height = 5)
+  
+  c_late <- simsurv( dist="weibull", 
+                         gammas=shape[3], 
+                         lambdas=scale[2]^(-shape[3]), 
+                         x=data.frame(id = 1:100000),
+                         maxt=maxtime)
+    p <- survfit( Surv( eventtime, status)~1, data = c_late)|>
+        survfit_n() |>
+        plot_km_eff2( xlab = "Time (years)")
+  #ggsave(file = "images/simc_km_l.svg", plot=p, width = 7, height = 5)
+```
+
+```{r}
+#| eval: FALSE
+#| include: FALSE
+#| label: fig-sim-same-risk-diff-ess
+#| fig-cap: Simulation of two same Kaplan-Meier curves, where the censoring distribution is chosen such that the number at risk will be the same for both simulations at some point, while the effective sample size is different.
+#| fig-width: 14
+#| fig-asp: 1
+
+# Seed for consistency
+set.seed(111923)
+
+# scale[1] for events, scale[2] for censoring 1 and scale[3] for censoring 2
+scale = c(2.5, 2.5, 2.5)
+# shape[1] for events, [2] for censoring 1 and [3] for censoring 2
+shape = c(1, 1/2, 2)
+# number of iterations
+iter = 300
+# maxtime
+maxtime = 5
+# timegrid for plot
+time = seq(0, maxtime, 0.002)
+
+# So my setup is as follows. For the survival curve, I take the same for both, a Weibull( 1, 2.5 ), which is also an exponential distribution.
+# For the censoring, if I also use scale 2.5 for both of those, then the cumulative hazard for both the events and censoring will be 1 in both
+# simulations, which means that the number a risk must be the same as well (asymptotically, not every iteration of course). Then I can 
+# change the effective sample size by varying the shape of the censoring distribution. If I change it too harshly, then the survival
+# function may be affected, so I choose 2 and 1/2 for it.
+
+dat1 <- dat2 <- 0
+# Multiple simulations - average 1 at a time
+for ( i in 1:iter ){
+  # Generate the six datasets of 1000 patients
+  events <- simsurv( dist="weibull", 
+                         gammas=shape[1], 
+                         lambdas=scale[1]^(-shape[1]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  censoring_1 <- simsurv( dist="weibull", 
+                         gammas=shape[2], 
+                         lambdas=scale[2]^(-shape[2]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  censoring_2 <- simsurv( dist="weibull", 
+                         gammas=shape[3], 
+                         lambdas=scale[3]^(-shape[3]), 
+                         x=data.frame(id = 1:1000),
+                         maxt=maxtime)
+  
+  # Build the 2 dataframes for the figures
+  df_1 <- data.frame(
+    time = pmin(events$eventtime, censoring_1$eventtime),
+    status = ifelse(events$eventtime == maxtime & censoring_1$eventtime == maxtime, 0,
+                    ifelse(events$eventtime <= censoring_1$eventtime, 1, 0))
+  )
+  df_2 <- data.frame(
+    time = pmin(events$eventtime, censoring_2$eventtime),
+    status = ifelse(events$eventtime == maxtime & censoring_2$eventtime == maxtime, 0,
+                    ifelse(events$eventtime <= censoring_2$eventtime, 1, 0))
+  )
+  dat1 <- dat1 + 1/iter*(survfit( Surv( time, status ) ~ 1, data = df_1 ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+  dat2 <- dat2 + 1/iter*(survfit( Surv( time, status ) ~ 1, data = df_2 ) |>
+                       survfit_n() |>
+                       sf_to_df( time = time ))
+}
+
+n <- 1000
+color_values <- c("Early Censoring"= "#2E7691", "Late Censoring" = "#C2666B")
+linetype_values <- c("Effective"= "solid", "At Risk" = "dashed")
+# calculate the time where dat1$n.risk and dat2$n.risk cross over, that is, the bigger becomes smaller
+plot <- ggplot() +
+    geom_step(aes(x = dat1$time, y = dat1$n.eff, color = "Early Censoring", linetype = "Effective"), linewidth = 1.3) +
+    geom_step(aes(x = dat1$time, y = dat1$n.risk, color = "Early Censoring", linetype = "At Risk"), linewidth = 1.3) +
+    geom_step(aes(x = dat2$time, y = dat2$n.eff, color = "Late Censoring", linetype = "Effective"), linewidth = 1.3) +
+    geom_step(aes(x = dat2$time, y = dat2$n.risk, color = "Late Censoring", linetype = "At Risk"), linewidth = 1.3) +
+    labs(x = "Time", y = "Number") +
+    scale_x_continuous(breaks = seq(0, maxtime, length.out = 5)) +
+    theme_minimal() +
+    theme(legend.position.inside = c(0.1, 0.4), panel.grid.major.x = element_blank()) +
+    theme(text = element_text(size = 12), plot.title = element_text( size = 18, hjust = 0.3)) +
+    scale_color_manual(values = color_values, name = "Legend") +
+    scale_linetype_manual(values = linetype_values, name = "Legend") + 
+    geom_vline(xintercept = 2.5, linetype = "dotted", lwd = 1.3)
+plot
+ggsave(file = "images/hein_sim_n.svg", plot=plot, width = 7, height = 5)
+
+plot2 <- ggplot() +
+    geom_step(aes(x = dat1$time, y = dat1$surv, color = "Early Censoring"), linewidth = 1.3) +
+    geom_step(aes(x = dat2$time, y = dat2$surv, color = "Late Censoring"), linewidth = 1.3) +
+    labs(x = "Time", y = "Survival probability") +
+    scale_x_continuous(breaks = seq(0, maxtime, length.out = 5)) +
+    theme_minimal() +
+    theme(legend.position.inside = c(0.1, 0.4), panel.grid.major.x = element_blank()) +
+    theme(text = element_text(size = 12), plot.title = element_text( size = 18, hjust = 0.3)) +
+    scale_color_manual(values = color_values, name = "Legend") +
+    scale_linetype_manual(values = linetype_values, name = "Legend") + 
+    geom_vline(xintercept = 2.5, linetype = "dotted", lwd = 1.3)
+plot2
+#ggsave(file = "images/hein_sim_surv.svg", plot=plot2, width = 7, height = 5)
+```
+
+The rows in @fig-simulation show that differences in censoring hazard cause different shapes of $N_{\text{eff}}$ for the survival estimate. There are also differences in the number at risk between these scenarios. However, in a simulation where the survival probability is the exact same (@fig-samerisk), the effective sample size is different when the number at risk is also the same at $t=2.5$ (@fig-samerisk).
+
+![Example where both survival probabilities and number at risk are the same in two data sets at $t = 2.5$. Due to different censoring distributions, the effective sample size is different.](images/same_risk_diff_n.jpg){#fig-samerisk}
+
+## Effective sample size during trial follow-up
+Effective sample size can inform how much information is available for estimating the survival probability at the timepoint of interest. Maximum information is available when all patients have either experienced an event or reached the time horizon of interest. If either happens to all patients, then $N_{\text{eff}}$ of the estimated survival probability at the time horizon of interest is equal to the number of enrolled patients. 
+
+```{r}
+#| eval: FALSE
+#| output: FALSE
+#| include: FALSE
+#| label: fig-sim-trial
+#| fig-width: 10
+#| fig-asp: 0.5
+#| fig-cap: |
+#|   Results of a simulated trial for two-year survival after a two-year enrollment period. The three graphs illustrate the trajectory of effective sample size for reporting the results at different times after study initiation. After two years, only the first enrolled patient will have the follow-up of two year that is of interest. After three years, half the patients will have complete follow-up. Four years after the study started, even the last enrolled patient will have the complete two years of follow-up and effective sample size will always be equal to complete sample size.
+
+# Seed for consistency
+set.seed(111923)
+
+# Scale and Shape
+scale = 3
+shape = 0.5
+
+# number of iterations
+iter = 1
+# timegrid for plot
+maxtime = 2
+time = seq(0, maxtime, 0.002)
+
+
+# Multiple simulations - average 1 at a time
+for ( i in 1:iter ){
+  # Generate the survival time
+  survival <- simsurv( dist="weibull", 
+                         gammas=shape, 
+                         lambdas=scale^(-shape), 
+                         x=data.frame(id = 1:250),
+                         maxt=maxtime)
+  
+  # Generate enrollment time
+  survival$tstart <- runif(250, 0, 2)
+  
+  # Survival in 'real' time since start study
+  survival$tstop <- survival$tstart + survival$eventtime
+  
+  
+  four <- data.frame(
+  time = survival$eventtime,
+  status = survival$status
+  )
+  
+  three <- data.frame(
+  time = ifelse( survival$tstop < 3, survival$eventtime, survival$eventtime - (survival$tstop - 3)),
+  status = ifelse( survival$tstop < 3, survival$status, 0)
+  )
+
+  two <- data.frame(
+  time = ifelse( survival$tstop < 2, survival$eventtime, survival$eventtime - (survival$tstop - 2)),
+  status = ifelse( survival$tstop < 2, survival$status, 0)
+  )
+}
+
+# Two years
+plot1 <- survfit( Surv(time, status) ~1, data = two ) |> 
+  survfit_n() |>
+  plot_effective_n( mod = T, survival = T, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = T, ticks_y_sec = F )
+
+# Two half years
+plot2 <- survfit( Surv(time, status) ~1, data = three ) |> 
+  survfit_n() |>
+  plot_effective_n( mod = T, survival = T, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = T, ticks_y_sec = F )
+
+# Three years
+plot3 <- survfit( Surv(time, status) ~1, data = four ) |> 
+  survfit_n() |>
+  plot_effective_n( mod = T, survival = T, bounds = F, xlim = c(0, maxtime), labels = F, no_legend = T, ticks_x = T, ticks_y_sec = F )
+
+# Combine plots into list
+plots <- list( plot1, plot2, plot3 )
+
+# Column and row labels
+col_labels <- c("Two years", "Three years", "Four years")
+
+# Create text grobs for column and row labels
+col_text <- lapply(col_labels, textGrob, gp = gpar(fontsize = 12))
+
+# Create a sample plot to extract the legend
+legend_plot <- ggplot(data.frame(x = 1, y = 1, 
+                                 color = c("Effective", "Modified", "Uncensored", "At risk", "Incidence"), 
+                                 linetype = c("Effective", "Modified", "Uncensored", "At risk", "Incidence")), 
+                      aes(x = x, y = y, color = color, linetype = linetype)) +
+  geom_line(linewidth = 1.3) +
+  scale_color_manual(values = c("Effective"= "#37293F", "At risk" = "#C2666B", "Uncensored" = "#2E7691", "Modified" = "#9f84af", "Incidence" = "#c6aa2c"), name = "Legend") +
+  scale_linetype_manual(values = c("Effective"= "solid", "At risk" = "longdash", "Uncensored" = "dotdash", "Modified" = "solid", "Incidence" = "solid"), name = "Legend") +
+  theme(legend.position = "right") + theme_minimal()
+# "Bounds", 
+# "Bounds" = "#c6b5cf", 
+# "Bounds" = "dashed", 
+
+
+# Extract the legend
+legend <- cowplot::get_legend(legend_plot)
+
+# Create top row with column labels
+top_row <- arrangeGrob(
+  grobs = col_text,
+  ncol = 3,
+  widths = c(732/675, 1, 732/675)
+)
+
+# Create each row with plots and row label
+rows <- arrangeGrob(
+    grobs = plots[1:3],
+    ncol = 3,
+    widths = c(732/675, 1, 732/675)
+)
+
+# Combine the top row and all plot rows into the final grid
+final_grid <- arrangeGrob(
+  grobs = c(list(top_row), list(rows)),
+  ncol = 1,
+  heights = c(0.1, 1)
+)
+
+# Add legend to the grid
+combined_grid <- arrangeGrob(
+  final_grid,
+  legend,
+  ncol = 2,
+  widths= c(7, 1)
+)
+
+# Display the final grid
+grid.draw(combined_grid)
+
+```
+
+```{r}
+#| eval: FALSE
+#| output: FALSE
+#| label: fig-sim-reporting
+#| fig-width: 7
+#| fig-asp: 0.618
+#| fig-cap: |
+#|   Figure that shows the mean modified effective sample size of the two-year Kaplan-Meier survival estimate as a function of time. The baseline cumulative hazard was based on a Weibull(3, 0.5) distribution, with enrollment according to a uniform distribution over the first two years of the study. A treatment was given to group `Treat 2` with a hazard ratio of 0.7. Confidence bands are based on the observed 95% range (2.5-97.5% interquantile range) based on 1000 simulations.
+
+# Seed for consistency
+set.seed(111923)
+
+plot <- trial_report( gammas = c(0.5), 
+              lambdas = c(3^(-0.5)), 
+              x = data.frame( id = 1:500,
+                              treat = c(rep(0, 250), rep(1, 250))),
+              betas = c(treat = 0.7),
+              t_outcome = 2, 
+              t_enroll = 2, 
+              iter = 250, 
+              n_patient = 250,
+              points = 25,
+              conf = T,
+              conf.int = 95,
+              proportion = F,
+              mod = F,
+              ylab = "Effective Sample Size for 2 year survival",
+              xlab = "Time since study start",
+              title = "Effective sample size over reporting time"
+              )
+plot
+#ggsave(file = "images/trial_std.svg", plot=plot, width = 7, height = 5)
+```
+
+![Percentage of modified Neff of the two-year Kaplan-Meier survival estimate as a function of time. A treatment was given to group Treat 2 with a hazard ratio of 0.7. Pointwise confidence intervals are based on the observed 95% range (2.5-97.5% interquantile range) based on 25000 simulations. Most of the information in the trial is already available one year before the natural end of the trial. ](images/trial%.jpg){#fig-trial}
+
+This simulation shows that 87% of the information is available for the untreated group (`Treat 1`) at reporting time of three years, with a 95% interquantile range of 80%-93%. The group receiving the treatment (`Treat 2`) has a lower effective sample size at most reporting times. For the treated group, the effective sample size is around 83% (72%-91%) of the maximum at a reporting time of 3 years of study duration.
+
+
+# Discussion
+Sample size is a key concept in drawing conclusions from data [@consort]: an estimate based on a larger sample size is more reliable than one based on a smaller sample size, all else staying the same. In the context of time-to-event data sample size is a more challenging concept, because of censoring. To inform about the reliability of an estimate with the same interpretation as the sample size in settings with complete follow-up, we argue for use of the effective sample size for several applications.
+
+
+## Presented below Kaplan-Meier
+Kaplan-Meier curves are often presented to show the primary outcome of a study, such as overall survival, or relapse-free survival. Guidelines and tutorials on the presentation of survival curves state that the number of patients at risk should be presented below the curve [@vickers2020; @morris2019; @jager2008; @pocock2002]. Often this is accompanied by a recommendation that the survival curve is truncated when the number at risk falls below a certain percentage of the number non censored (10-20%) [@pocock2002], or below an absolute number (5-10) [@vickers2020]. Number at risk is a measure of the reliability of the hazard at time $t$, which relates to the uncertainty in future survival probability estimates, conditional on being alive at time $t$. In contrast, (modified) $N_{\text{eff}}$ indicates the reliability of the estimated survival probability at time $t$, which is informative from the start of a study.
+Effective sample size can be used in addition to the number of patients at risk in a table below the curve. It can be interpreted as the size of a cohort of $N_{\text{eff}}$ patients with full follow-up to estimate survival at time $t$ that leads to the same estimated variance.
+
+
+## Trial monitoring
+Trials with a survival outcome are generally powered for detecting an expected difference between at least two arms, often expressed as a hazard ratio. During the design phase, this power analysis results in a required sample size for detecting the expected results with a pre-determined power. During the trial, there may be differences between the numbers used in power calculations during the design phase and what is observed. Such changes are not always acted upon, because interim analyses can inflate type I error rates [@houwelingen2005]. This may not applicable to decisions based on estimates of effective sample size, especially if treatment allocation remains blinded to the analyst. 
+Several situations could be considered where changes in the moment of analysis may be desired. More events than expected can positively impact the effective sample size which may allow for earlier analysis, while more censoring than expected may negatively impact $N_{\text{eff}}$. Enrollment may also be slower than expected, and lead to constraints with time and funding. In such situations, effective sample size may help answer such questions, but must be used carefully and are not a substitute for power analysis. Further research is required to assess any possible impact on type I error rates from stopping rules based on effective sample size.
+
+
+## Risk communication
+Communicating with patients about the uncertainty or reliability of the evidence supporting a treatment choice. Open communication about uncertainty is an important step in improving trustworthiness [@spiegelhalter2017;@spiegelhalter2017address]. Experts, such as care givers, are still hesitant to communicate uncertainty, because it may undermine trust in their work [@fischhoff2012] or it seems futile to try to explain it [@kattan2011]. There are indications that communication of uncertainty in a numerical manner does not reduce trust in the number or the source [@vanderbles2020]. Sharing information about the quality of evidence affects decision-making and people are less likely to base their decisions on number with low quality of evidence [@schneider2022].
+
+An instruction with a nomogram for prostate cancer risk states that physicians should tell a patient: “if we had 100 men exactly like you, we would expect between $risk\%-10\%$ and $risk\%+10\%$ to remain free of their disease at 5 years” [@kattan2002]. Such a presentation conveys the absolute risk to a patient. It does not tell the patient how many ‘men like you’ this number was based on, which is provided by the effective sample size. Note that there is also no explanation given of what ‘men exactly like you’ means, which is therefore left open to interpretation. Future research into effective sample size for Cox proportional hazards prediction models could develop the concept of effective sample size into a number more closely resembling the idea of ‘patients like you’. This would be the effective sample size of a prediction $\hat S(t, x_{new})$ for a new patient with covariates $x_{new}$ (Thomassen 2024).  
+
+Such communication about uncertainty could be used in the framework of shared decision making in medical care [@stiggelbout2015;@4Dpicture]. We provide an illustrative example of a communication tool based on the colon data with effective sample size in @fig-example. The definition of ‘patients like you’ for effective sample size are patients with the same values for the model covariates, in this example  only treatment. For clinical application, important prognostic factors should be considered, and the format for presentation may need further refinement.
+
+
+![Example of using effective sample size in risk communication. This example compares the survival in the arm of observation after surgery to that of adjuvant Lev+5FU after surgery. It illustrates a possible visualization of the risk difference and communication of effective sample size.](images/communication.jpg){#fig-example}
+
+We note that uncertainty communication using effective sample size may not be  preferred by all patients. Patients with high numeracy and statistical literacy may prefer to learn the $95\%$ confidence interval for a prediction. Patients with low numeracy may prefer to only know if an estimate is certain or uncertain [@vromans2021].
+
+
+# Conclusion
+Effective sample size is valuable as an intuitive measure of the uncertainty of a survival estimate from the Kaplan-Meier estimator, which has the same interpretation as sample size in studies without censoring. It can be used in risk tables in addition to the number at risk, where it is an intuitive estimate of reliability for estimated survival probabilities at the time of interest. Future research should explore the role of effective sample size for trial monitoring, uncertainty communication and regression models with survival outcomes.
